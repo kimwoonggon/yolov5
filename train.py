@@ -477,7 +477,7 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--linear-lr', action='store_true', help='linear LR')
-    parser.add_argument('--fold', type='int', default=0, help='fold_number')
+    parser.add_argument('--fold', type=int, default=0, help='fold_number')
     opt = parser.parse_args()
 
     # Set DDP variables
