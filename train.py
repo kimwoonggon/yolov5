@@ -40,16 +40,16 @@ logger = logging.getLogger(__name__)
 
 def train(hyp, opt, device, tb_writer=None, wandb=None):
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
-    save_dir, epochs, batch_size, total_batch_size, weights, rank = \
-        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank
+    save_dir, epochs, batch_size, total_batch_size, weights, rank, fold = \
+        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.fold
 
     # Directories
     ROOT_PATH = "gdrive/My Drive/Colab Notebooks/vin_save"
     wdir = ROOT_PATH + os.sep  # weights dir
     os.makedirs(wdir, exist_ok=True)
-    last = wdir + 'last.pt'
-    best = wdir + 'best.pt'
-    results_file = wdir + 'results.txt'
+    last = wdir + f'last{str(fold)}.pt'
+    best = wdir + f'best{str(fold)}.pt'
+    results_file = wdir + f'results{str(fold)}.txt'
 
     # Save run settings
     with open(save_dir / 'hyp.yaml', 'w') as f:
@@ -475,6 +475,7 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--linear-lr', action='store_true', help='linear LR')
+    parser.add_argument('--fold', action='fold_for_save', help='fold_number')
     opt = parser.parse_args()
 
     # Set DDP variables
