@@ -46,7 +46,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     # Directories
     ROOT_PATH = "gdrive/My Drive/Colab Notebooks/vin_save"
      
-    ROOT_PATH = ROOT_PATH + os.sep  # weights dir
+    #ROOT_PATH = ROOT_PATH + os.sep  # weights dir
     save_dir = Path(ROOT_PATH)
     #os.makedirs(wdir, exist_ok=True)
     last = save_dir / f'last{str(fold)}.pt'
