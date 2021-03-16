@@ -50,7 +50,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     save_dir = Path(ROOT_PATH)
     #os.makedirs(wdir, exist_ok=True)
     last = save_dir / f'last_fold{str(fold)}_imsize{str(imsize)}.pt'
-    best = save_dir / f'best_fold{str(fold)}_imsize{str(imsize}}.pt'
+    best = save_dir / f'best_fold{str(fold)}_imsize{str(imsize)}.pt'
     results_file = save_dir / f'results_fold{str(fold)}_imsize{str(imsize)}.txt'
 
     # Save run settings
