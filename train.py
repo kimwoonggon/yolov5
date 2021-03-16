@@ -42,16 +42,16 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     save_dir, epochs, batch_size, total_batch_size, weights, rank, fold = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank, opt.fold
-
+    imsize = opt.image_size
     # Directories
     ROOT_PATH = "gdrive/My Drive/Colab Notebooks/vin_save"
      
     #ROOT_PATH = ROOT_PATH + os.sep  # weights dir
     save_dir = Path(ROOT_PATH)
     #os.makedirs(wdir, exist_ok=True)
-    last = save_dir / f'last{str(fold)}.pt'
-    best = save_dir / f'best{str(fold)}.pt'
-    results_file = save_dir / f'results{str(fold)}.txt'
+    last = save_dir / f'last_fold{str(fold)}_imsize{str(imsize)}.pt'
+    best = save_dir / f'best_fold{str(fold)}_imsize{str(imsize}}.pt'
+    results_file = save_dir / f'results_fold{str(fold)}_imsize{str(imsize)}.txt'
 
     # Save run settings
     with open(save_dir / 'hyp.yaml', 'w') as f:
