@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from utils.general import bbox_iou
+from utils.metrics import bbox_iou
 from utils.torch_utils import is_parallel
 
 
@@ -89,6 +89,7 @@ class ComputeLoss:
     # Compute losses
     def __init__(self, model, autobalance=False):
         super(ComputeLoss, self).__init__()
+        self.sort_obj_iou = False
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
 
@@ -97,7 +98,7 @@ class ComputeLoss:
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
-        self.cp, self.cn = smooth_BCE(eps=0.0)
+        self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
 
         # Focal loss
         g = h['fl_gamma']  # focal loss gamma
@@ -133,7 +134,11 @@ class ComputeLoss:
                 lbox += (1.0 - iou).mean()  # iou loss
 
                 # Objectness
-                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
+                score_iou = iou.detach().clamp(0).type(tobj.dtype)
+                if self.sort_obj_iou:
+                    sort_id = torch.argsort(score_iou)
+                    b, a, gj, gi, score_iou = b[sort_id], a[sort_id], gj[sort_id], gi[sort_id], score_iou[sort_id]
+                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * score_iou  # iou ratio
 
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)

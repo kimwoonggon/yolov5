@@ -1,6 +1,7 @@
-# PyTorch utils
+# YOLOv5 PyTorch utils
+
+import datetime
 import logging
-import math
 import os
 import platform
 import subprocess
@@ -9,14 +10,16 @@ from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 
+import math
 import torch
 import torch.backends.cudnn as cudnn
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
 try:
-    import thop  # for FLOPS computation
+    import thop  # for FLOPs computation
 except ImportError:
     thop = None
 logger = logging.getLogger(__name__)
@@ -28,10 +31,10 @@ def torch_distributed_zero_first(local_rank: int):
     Decorator to make all processes in distributed training wait for each local_master to do something.
     """
     if local_rank not in [-1, 0]:
-        torch.distributed.barrier()
+        dist.barrier()
     yield
     if local_rank == 0:
-        torch.distributed.barrier()
+        dist.barrier()
 
 
 def init_torch_seeds(seed=0):
@@ -43,18 +46,26 @@ def init_torch_seeds(seed=0):
         cudnn.benchmark, cudnn.deterministic = True, False
 
 
-def git_describe():
+def date_modified(path=__file__):
+    # return human-readable file modification date, i.e. '2021-3-26'
+    t = datetime.datetime.fromtimestamp(Path(path).stat().st_mtime)
+    return f'{t.year}-{t.month}-{t.day}'
+
+
+def git_describe(path=Path(__file__).parent):  # path must be a directory
     # return human-readable git description, i.e. v5.0-5-g3e25f1e https://git-scm.com/docs/git-describe
-    if Path('.git').exists():
-        return subprocess.check_output('git describe --tags --long --always', shell=True).decode('utf-8')[:-1]
-    else:
-        return ''
+    s = f'git -C {path} describe --tags --long --always'
+    try:
+        return subprocess.check_output(s, shell=True, stderr=subprocess.STDOUT).decode()[:-1]
+    except subprocess.CalledProcessError as e:
+        return ''  # not a git repository
 
 
 def select_device(device='', batch_size=None):
     # device = 'cpu' or '0' or '0,1,2,3'
-    s = f'YOLOv5 🚀 {git_describe()} torch {torch.__version__} '  # string
-    cpu = device.lower() == 'cpu'
+    s = f'YOLOv5 🚀 {git_describe() or date_modified()} torch {torch.__version__} '  # string
+    device = str(device).strip().lower().replace('cuda:', '')  # to string, 'cuda:0' to '0'
+    cpu = device == 'cpu'
     if cpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # force torch.cuda.is_available() = False
     elif device:  # non-cpu device requested
@@ -63,11 +74,12 @@ def select_device(device='', batch_size=None):
 
     cuda = not cpu and torch.cuda.is_available()
     if cuda:
-        n = torch.cuda.device_count()
-        if n > 1 and batch_size:  # check that batch_size is compatible with device_count
+        devices = device.split(',') if device else '0'  # range(torch.cuda.device_count())  # i.e. 0,1,6,7
+        n = len(devices)  # device count
+        if n > 1 and batch_size:  # check batch_size is divisible by device_count
             assert batch_size % n == 0, f'batch-size {batch_size} not multiple of GPU count {n}'
-        space = ' ' * len(s)
-        for i, d in enumerate(device.split(',') if device else range(n)):
+        space = ' ' * (len(s) + 1)
+        for i, d in enumerate(devices):
             p = torch.cuda.get_device_properties(i)
             s += f"{'' if i == 0 else space}CUDA:{d} ({p.name}, {p.total_memory / 1024 ** 2}MB)\n"  # bytes to MB
     else:
@@ -95,13 +107,13 @@ def profile(x, ops, n=100, device=None):
     x = x.to(device)
     x.requires_grad = True
     print(torch.__version__, device.type, torch.cuda.get_device_properties(0) if device.type == 'cuda' else '')
-    print(f"\n{'Params':>12s}{'GFLOPS':>12s}{'forward (ms)':>16s}{'backward (ms)':>16s}{'input':>24s}{'output':>24s}")
+    print(f"\n{'Params':>12s}{'GFLOPs':>12s}{'forward (ms)':>16s}{'backward (ms)':>16s}{'input':>24s}{'output':>24s}")
     for m in ops if isinstance(ops, list) else [ops]:
         m = m.to(device) if hasattr(m, 'to') else m  # device
         m = m.half() if hasattr(m, 'half') and isinstance(x, torch.Tensor) and x.dtype is torch.float16 else m  # type
         dtf, dtb, t = 0., 0., [0., 0., 0.]  # dt forward, backward
         try:
-            flops = thop.profile(m, inputs=(x,), verbose=False)[0] / 1E9 * 2  # GFLOPS
+            flops = thop.profile(m, inputs=(x,), verbose=False)[0] / 1E9 * 2  # GFLOPs
         except:
             flops = 0
 
@@ -124,7 +136,13 @@ def profile(x, ops, n=100, device=None):
 
 
 def is_parallel(model):
+    # Returns True if model is of type DP or DDP
     return type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
+
+
+def de_parallel(model):
+    # De-parallelize a model: returns single-GPU model if model is of type DP or DDP
+    return model.module if is_parallel(model) else model
 
 
 def intersect_dicts(da, db, exclude=()):
@@ -182,7 +200,7 @@ def fuse_conv_and_bn(conv, bn):
     # prepare filters
     w_conv = conv.weight.clone().view(conv.out_channels, -1)
     w_bn = torch.diag(bn.weight.div(torch.sqrt(bn.eps + bn.running_var)))
-    fusedconv.weight.copy_(torch.mm(w_bn, w_conv).view(fusedconv.weight.size()))
+    fusedconv.weight.copy_(torch.mm(w_bn, w_conv).view(fusedconv.weight.shape))
 
     # prepare spatial bias
     b_conv = torch.zeros(conv.weight.size(0), device=conv.weight.device) if conv.bias is None else conv.bias
@@ -203,13 +221,13 @@ def model_info(model, verbose=False, img_size=640):
             print('%5g %40s %9s %12g %20s %10.3g %10.3g' %
                   (i, name, p.requires_grad, p.numel(), list(p.shape), p.mean(), p.std()))
 
-    try:  # FLOPS
+    try:  # FLOPs
         from thop import profile
         stride = max(int(model.stride.max()), 32) if hasattr(model, 'stride') else 32
         img = torch.zeros((1, model.yaml.get('ch', 3), stride, stride), device=next(model.parameters()).device)  # input
-        flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
+        flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPs
         img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
-        fs = ', %.1f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
+        fs = ', %.1f GFLOPs' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPs
     except (ImportError, Exception):
         fs = ''
 
