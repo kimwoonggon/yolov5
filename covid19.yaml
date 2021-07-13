@@ -1,0 +1,5 @@
+names:
+- 0. opacity
+nc: 1
+train: train1.txt
+val: val1.txt
